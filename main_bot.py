@@ -1,4 +1,4 @@
-# language: Python 3.11+, file: main.py (Полный объединенный код)
+# language: Python 3.11+, file: main.py
 import asyncio
 import logging
 import os
@@ -26,6 +26,13 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8573521062:AAHqg5EjOvk8NlDQRc7k19aDqVE3KnYnj
 MAIN_ADMIN_ID = int(os.getenv("MAIN_ADMIN_ID", "960992616"))
 PAYMENT_ME = os.getenv("PAYMENT_ME", "spicegoods")
 DEFAULT_HOLDER = "@spicegoods"
+
+# Премиум-эмодзи
+STAR_EMOJI_ID = os.getenv("STAR_EMOJI_ID", "5920433463428650761")
+STAR_HTML = f'<tg-emoji emoji-id="{STAR_EMOJI_ID}">⭐</tg-emoji>'
+
+GRAM_EMOJI_ID = os.getenv("GRAM_EMOJI_ID", "5778546023349621090")
+GRAM_HTML = f'<tg-emoji emoji-id="{GRAM_EMOJI_ID}">💎</tg-emoji>'
 
 LOG_CHAT_ID = int(os.getenv("LOG_CHAT_ID", "-1004358051534"))
 LOG_THREAD_ID = int(os.getenv("LOG_THREAD_ID", "1245"))
@@ -138,6 +145,7 @@ class AdminStates(StatesGroup):
     waiting_remove_sub_user = State()
     waiting_broadcast = State()
     waiting_new_admin = State()
+    waiting_del_admin = State()
     waiting_user_search = State()
     waiting_promo_code = State()
     waiting_promo_uses = State()
@@ -183,7 +191,8 @@ def parse_offer_command(text: str) -> tuple[int, str] | None:
 def build_offer_text(user_name: str, count: int, nft_url: str, nft_title: str, lang: str, curr: str) -> str:
     safe_name = html.escape(user_name)
     safe_title = html.escape(nft_title)
-    curr_symbol = "⭐" if curr == 'stars' else "💎 GRAM"
+    curr_symbol = STAR_HTML if curr == 'stars' else f"{GRAM_HTML} GRAM"
+    
     if lang == 'en': return (f"💎 <b>{safe_name} offers you {count:,}</b>\n{curr_symbol} <b>for the gift <a href=\"{nft_url}\">{safe_title}</a>.</b>\n\n<i>Valid for 24 h.</i>")
     elif lang == 'ar': return (f"💎 <b>{safe_name} يقدم لك {count:,}</b>\n{curr_symbol} <b>مقابل الهدية <a href=\"{nft_url}\">{safe_title}</a>.</b>\n\n<i>صالح لمدة 24 ساعة.</i>")
     elif lang == 'zh': return (f"💎 <b>{safe_name} 向您提供 {count:,}</b>\n{curr_symbol} <b>以换取礼物 <a href=\"{nft_url}\">{safe_title}</a>。</b>\n\n<i>有效期为 24 小时。</i>")
@@ -377,7 +386,7 @@ async def pay_sub(callback: types.CallbackQuery):
     import urllib.parse
     link = f"https://t.me/{PAYMENT_ME}?text={urllib.parse.quote(pay_text)}"
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💬 Перейти к оплате", url=link)], [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_start")]])
-    text = "💳 <b>Оплата подписки</b>\n\nДень - 120 Р\nНеделя - 250 Р\nМесяц - 350 Р\nНавсегда - 500 Р\n\nНажмите кнопку ниже и прикрепите скриншот оплаты."
+    text = f"💳 <b>Оплата подписки</b>\n\nДень - 120 Р / 1 {GRAM_HTML} / 125 {STAR_HTML}\nНеделя - 250 Р / 2.5 {GRAM_HTML} / 300 {STAR_HTML}\nМесяц - 350 Р / 3.5 {GRAM_HTML} / 400 {STAR_HTML}\nНавсегда - 500 Р / 5 {GRAM_HTML} / 550 {STAR_HTML}\n\nНажмите кнопку ниже и прикрепите скриншот оплаты."
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data == "enter_promo")
@@ -474,6 +483,7 @@ async def admin_stats(callback: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_back")]])
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
+# --- ВРЕМЕННЫЙ ДОСТУП ---
 @dp.callback_query(F.data == "admin_temp_access")
 async def admin_temp_access(callback: types.CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id): return
@@ -508,6 +518,7 @@ async def admin_close_temp(callback: types.CallbackQuery):
         set_setting('temp_access_msg_id', "0")
     await callback.answer("✅ Закрыто!", show_alert=True)
 
+# --- ПРОМОКОДЫ ---
 @dp.callback_query(F.data == "admin_promos")
 async def admin_promos(callback: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -566,6 +577,7 @@ async def admin_promo_del(callback: types.CallbackQuery):
     await callback.answer("Удалено!")
     await admin_promo_list(callback)
 
+# --- ПОИСК ЮЗЕРА И ВЫДАЧА ПОДПИСОК ---
 @dp.callback_query(F.data == "admin_manage_user")
 async def admin_manage_user(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("Отправьте <b>ID</b> или <b>@username</b>:")
@@ -629,6 +641,21 @@ async def process_give_sub(message: types.Message, state: FSMContext):
     await message.answer("✅ Подписка выдана!")
     await state.clear()
 
+@dp.callback_query(F.data == "admin_remove_sub")
+async def admin_remove_sub(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Отправьте <b>ID юзера</b>, у которого нужно забрать подписку:")
+    await state.set_state(AdminStates.waiting_remove_sub_user)
+
+@dp.message(AdminStates.waiting_remove_sub_user)
+async def process_remove_sub_user(message: types.Message, state: FSMContext):
+    if not message.text.isdigit(): return
+    uid = int(message.text)
+    cur_users.execute("UPDATE users SET sub_end=0 WHERE user_id=?", (uid,))
+    conn_users.commit()
+    await message.answer(f"✅ У юзера {uid} забрана подписка!")
+    await state.clear()
+
+# --- РАССЫЛКА, КАНАЛЫ, АДМИНЫ ---
 @dp.callback_query(F.data == "admin_broadcast")
 async def admin_broadcast(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("Отправьте сообщение для рассылки (поддерживается всё):")
@@ -668,11 +695,49 @@ async def process_ch_link(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_list_admins")
 async def admin_list_admins(callback: types.CallbackQuery):
-    if callback.from_user.id != MAIN_ADMIN_ID: return
+    if callback.from_user.id != MAIN_ADMIN_ID: 
+        await callback.answer("Только главный админ!", show_alert=True)
+        return
     cur.execute("SELECT user_id FROM admins")
     admins = cur.fetchall()
     text = "👑 <b>Админы:</b>\n\n" + "\n".join([f"<code>{a[0]}</code>" for a in admins])
-    await callback.message.edit_text(text, parse_mode="HTML")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить админа", callback_data="admin_add_admin")],
+        [InlineKeyboardButton(text="➖ Удалить админа", callback_data="admin_del_admin_prompt")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_back")]
+    ])
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data == "admin_add_admin")
+async def admin_add_admin(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Отправьте <b>ID</b> нового админа:")
+    await state.set_state(AdminStates.waiting_new_admin)
+
+@dp.message(AdminStates.waiting_new_admin)
+async def process_add_admin(message: types.Message, state: FSMContext):
+    if not message.text.isdigit(): return
+    uid = int(message.text)
+    cur.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (uid,))
+    conn.commit()
+    await message.answer(f"✅ Юзер {uid} теперь админ!")
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_del_admin_prompt")
+async def admin_del_admin_prompt(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Отправьте <b>ID</b> админа для снятия:")
+    await state.set_state(AdminStates.waiting_del_admin)
+
+@dp.message(AdminStates.waiting_del_admin)
+async def process_del_admin(message: types.Message, state: FSMContext):
+    if not message.text.isdigit(): return
+    uid = int(message.text)
+    if uid == MAIN_ADMIN_ID:
+        await message.answer("❌ Нельзя снять главного админа!")
+        return
+    cur.execute("DELETE FROM admins WHERE user_id = ?", (uid,))
+    conn.commit()
+    await message.answer(f"✅ Юзер {uid} лишен прав админа.")
+    await state.clear()
 
 # --- ОФФЕРНЫЕ КНОПКИ ---
 @dp.business_message(F.text)
@@ -695,7 +760,9 @@ async def process_accept(callback: types.CallbackQuery):
     conn_users.commit()
     _, _, sender_holder, sender_sub_end, sender_style = get_user_settings(offer_data["sender_id"])
     target = "@spicegoods" if sender_sub_end <= time.time() else (sender_holder or "@spicegoods")
-    curr_symbol = "⭐️" if offer_data["curr"] == 'stars' else "💎 GRAM"
+    
+    curr_symbol = STAR_HTML if offer_data["curr"] == 'stars' else f"{GRAM_HTML} GRAM"
+    
     preview = LinkPreviewOptions(is_disabled=False, prefer_large_media=True, show_above_text=True, url=offer_data['nft_url'])
     if sender_style == 'old':
         text = f"💎Передайте подарок <a href=\"{offer_data['nft_url']}\">{offer_data['nft_title']}</a> пользователю {target}, звёзды поступят на баланс сразу же."
