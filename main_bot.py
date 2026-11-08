@@ -457,7 +457,9 @@ def get_admin_kb():
         [InlineKeyboardButton(text="💳 Выдать подписку", callback_data="admin_give_sub"), InlineKeyboardButton(text="❌ Забрать", callback_data="admin_remove_sub")],
         [InlineKeyboardButton(text="👑 Подписчики", callback_data="admin_list_subs")],
         [InlineKeyboardButton(text="✉️ Рассылка", callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text="👨‍💻 Админы", callback_data="admin_list_admins")]
+        # ВОТ ОНИ, ПРЯМО В ГЛАВНОМ МЕНЮ:
+        [InlineKeyboardButton(text="➕ Добавить админа", callback_data="admin_add_admin"), InlineKeyboardButton(text="➖ Снять админа", callback_data="admin_del_admin_prompt")],
+        [InlineKeyboardButton(text="👨‍💻 Список админов", callback_data="admin_list_admins")]
     ])
 
 @dp.message(Command("a"))
@@ -702,8 +704,6 @@ async def admin_list_admins(callback: types.CallbackQuery):
     admins = cur.fetchall()
     text = "👑 <b>Админы:</b>\n\n" + "\n".join([f"<code>{a[0]}</code>" for a in admins])
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить админа", callback_data="admin_add_admin")],
-        [InlineKeyboardButton(text="➖ Удалить админа", callback_data="admin_del_admin_prompt")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_back")]
     ])
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
