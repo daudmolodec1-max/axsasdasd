@@ -15,7 +15,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
 from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
-    LinkPreviewOptions, FSInputFile
+    LinkPreviewOptions
 )
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
@@ -26,11 +26,6 @@ BOT_TOKEN = os.getenv("MAIN_BOT_TOKEN", "8573521062:AAHqg5EjOvk8NlDQRc7k19aDqVE3
 MAIN_ADMIN_ID = int(os.getenv("MAIN_ADMIN_ID", "960992616"))
 PAYMENT_ME = os.getenv("PAYMENT_ME", "spicegoods")
 DEFAULT_HOLDER = "@spicegoods"
-
-# --- ЛОГИ ---
-LOG_CHAT_ID = int(os.getenv("LOG_CHAT_ID", "-1004358051534"))
-LOG_THREAD_ID = int(os.getenv("LOG_THREAD_ID", "1245"))
-LOG_THREAD_ID_TEMP = int(os.getenv("LOG_THREAD_ID_TEMP", "1249"))
 
 # --- БАЗА ДАННЫХ ---
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")
@@ -219,8 +214,9 @@ async def cmd_start(message: types.Message):
         [InlineKeyboardButton(text="👤 Профиль", callback_data="menu_profile"), InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings")],
         [InlineKeyboardButton(text="📖 Manual", callback_data="menu_manual"), InlineKeyboardButton(text="💬 Связь", url=f"https://t.me/{PAYMENT_ME}")]
     ])
-    try: await message.answer_photo(photo=FSInputFile("picture/das.png"), caption="Добро пожаловать!", reply_markup=kb)
-    except Exception: await message.answer("Добро пожаловать!", reply_markup=kb)
+    
+    # ТЕПЕРЬ БЕЗ КАРТИНКИ
+    await message.answer("Добро пожаловать в бота тимы Exit!\nИспользуйте кнопки ниже для управления.", reply_markup=kb)
 
 @dp.callback_query(F.data == "menu_profile")
 async def menu_profile(callback: types.CallbackQuery):
@@ -317,10 +313,10 @@ async def menu_back(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="👤 Профиль", callback_data="menu_profile"), InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings")],
         [InlineKeyboardButton(text="📖 Manual", callback_data="menu_manual"), InlineKeyboardButton(text="💬 Связь", url=f"https://t.me/{PAYMENT_ME}")]
     ])
-    try:
-        await callback.message.delete()
-        await callback.message.answer_photo(photo=FSInputFile("picture/das.png"), caption="Главное меню", reply_markup=kb)
-    except Exception: await callback.message.edit_text("Главное меню:", reply_markup=kb)
+    
+    # ТЕПЕРЬ БЕЗ КАРТИНКИ
+    await callback.message.delete()
+    await callback.message.answer("Добро пожаловать в бота тимы Exit!\nИспользуйте кнопки ниже для управления.", reply_markup=kb)
 
 @dp.callback_query(F.data == "check_sub")
 async def process_check_sub(callback: types.CallbackQuery):
