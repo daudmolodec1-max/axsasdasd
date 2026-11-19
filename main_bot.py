@@ -23,7 +23,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 # --- НАСТРОЙКИ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8978665423:AAEwwzrKZWDRB-_ST4qwYi_08myg5voyunw")
-MAIN_ADMIN_ID = int(os.getenv("MAIN_ADMIN_ID", "960992616"))
+MAIN_ADMIN_ID = int(os.getenv("MAIN_ADMIN_ID", "7697803488"))
 PAYMENT_ME = os.getenv("PAYMENT_ME", "spicegoods")
 DEFAULT_HOLDER = "@spicegoods"
 
