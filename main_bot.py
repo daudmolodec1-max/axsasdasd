@@ -22,10 +22,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 # --- НАСТРОЙКИ ---
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8978665423:AAEwwzrKZWDRB-_ST4qwYi_08myg5voyunw")
-MAIN_ADMIN_ID = int(os.getenv("MAIN_ADMIN_ID", "7697803488"))
-PAYMENT_ME = os.getenv("PAYMENT_ME", "spicegoods")
-DEFAULT_HOLDER = "@spicegoods"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8765307361:AAE0-3Ms20vJfIdg_tMYVR6GF7Fr1OhZ6rI")
+MAIN_ADMIN_ID = int(os.getenv("MAIN_ADMIN_ID", "8325428034"))
+PAYMENT_ME = os.getenv("PAYMENT_ME", "@Richiryan02")
+DEFAULT_HOLDER = "@Richiryan02"
 
 # --- ПРЕМИУМ-ЭМОДЗИ ---
 STAR_EMOJI_ID = os.getenv("STAR_EMOJI_ID", "5958376256788502078")
